@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 from langchain_openai import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -11,6 +11,12 @@ import glob
 import pandas as pd
 
 load_dotenv()
+
+# Verify API key is loaded
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY not found in environment variables")
+print(f"API Key loaded (first 8 chars): {api_key[:8]}...")
 
 def parse_annotated_script(file_path):
         """
@@ -89,14 +95,13 @@ class RAGAgent:
             structured_data.extend(parse_annotated_script(anno_file))
         return structured_data
         
-    def initialize_vector_store(self, data_dir: str, use_manual: bool = True):
+    def initialize_vector_store(self, data_dir: str):
         """Initialize the vector store with script examples from the annotations
         
         Args:
-            data_dir: Base directory containing manual_annotations and BERT_annotations
-            use_manual: Whether to use manual annotations (True) or BERT annotations (False)
+            data_dir: Base directory containing manual_annotations
         """
-        structured_data = self.load_script_data(data_dir, use_manual)
+        structured_data = self.parse_data(data_dir)
         
         # Load metadata
         metadata_path = os.path.join(data_dir, 'movie_meta_data.csv')
@@ -113,7 +118,11 @@ class RAGAgent:
             script_id = scene.get('script_id', '')  # You'll need to add this in parse_annotated_script
             
             # Get metadata for this script
-            script_meta = metadata_df[metadata_df['imdbid'] == script_id].iloc[0] if not metadata_df[metadata_df['imdbid'] == script_id].empty else None
+            try:
+                script_meta = metadata_df[metadata_df['imdbid'] == script_id].iloc[0] if not metadata_df[metadata_df['imdbid'] == script_id].empty else None
+            except IndexError:
+                print(f"Warning: No metadata found for script ID {script_id}")
+                script_meta = None
             
             # Format dialog with speakers for better context
             dialog_with_speakers = []
@@ -163,11 +172,13 @@ class WriterAgent:
     def __init__(self, temperature: float = 0.7):
         self.llm = ChatOpenAI(temperature=temperature)
         self.prompt = PromptTemplate(
-            input_variables=["genre", "setting", "idea", "examples"],
+            input_variables=["genre", "setting", "idea", "director_style", "length", "examples"],
             template="""You are an experienced screenwriter. Write a compelling scene based on the following criteria:
             Genre: {genre}
             Setting: {setting}
             Core Idea: {idea}
+            Director Style: {director_style}
+            Length: {length}
             
             Here are some example scenes for reference:
             {examples}
@@ -183,7 +194,7 @@ class WriterAgent:
         )
         self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
     
-    def write_scene(self, genre: str, setting: str, idea: str, director_style: Optional[str], length: str,examples: List[str]) -> str:
+    def write_scene(self, genre: str, setting: str, idea: str, director_style: str, length: str, examples: List[str]) -> str:
         """Generate a scene based on the given criteria and examples"""
         examples_text = "\n\n".join(examples) if examples else "No examples provided."
         return self.chain.run(
@@ -199,15 +210,17 @@ class EditorAgent:
     def __init__(self, temperature: float = 0.3):
         self.llm = ChatOpenAI(temperature=temperature)
         self.prompt = PromptTemplate(
-            input_variables=["scene", "genre", "feedback_points"],
+            input_variables=["scene", "genre", "director_style", "length"],
             template="""You are an experienced script editor. Review and improve the following scene:
 
             Scene:
             {scene}
 
             Genre: {genre}
-            Consider these specific points:
-            {feedback_points}
+            
+            Director Style: {director_style}
+
+            Length: {length}
 
             Improve the scene while maintaining proper screenplay format:
             1. Scene headings (INT/EXT, location, time)
@@ -228,13 +241,13 @@ class EditorAgent:
         )
         self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
     
-    def edit_scene(self, scene: str, genre: str, feedback_points: List[str]) -> str:
+    def edit_scene(self, scene: str, genre: str, director_style: str, length: str) -> str:
         """Edit and improve the given scene"""
-        feedback_text = "\n".join(feedback_points)
         return self.chain.run(
             scene=scene,
             genre=genre,
-            feedback_points=feedback_text
+            director_style=director_style,
+            length=length
         )
 
 class ScriptGenerationCrew:
@@ -243,9 +256,9 @@ class ScriptGenerationCrew:
         self.writer_agent = WriterAgent()
         self.editor_agent = EditorAgent()
         
-    def initialize_with_data(self, data_dir: str, use_manual: bool = True):
+    def initialize_with_data(self, data_dir: str):
         """Initialize the RAG agent with annotated scripts"""
-        self.rag_agent.initialize_vector_store(data_dir, use_manual)
+        self.rag_agent.initialize_vector_store(data_dir)
     
     def generate_scene(self, 
                       genre: str, 
@@ -272,7 +285,9 @@ class ScriptGenerationCrew:
             
         final_scene = self.editor_agent.edit_scene(
             scene=initial_scene,
-            genre=genre
+            genre=genre,
+            director_style=director_style,
+            length=length
         )
         
         return {
@@ -288,15 +303,16 @@ if __name__ == "__main__":
     
     # Initialize with annotated data
     crew.initialize_with_data(
-        data_dir="data",
-        use_manual=True  # Use manual annotations (more accurate)
+        data_dir="data"
     )
     
     # Generate a scene
     result = crew.generate_scene(
         genre="Science Fiction",
         setting="Space Station",
-        idea="A crew member discovers an alien artifact that seems to be alive"
+        idea="A crew member discovers an alien artifact that seems to be alive",
+        director_style="Steven Spielberg",
+        length="short"
     )
     
     print("Final Scene:")
