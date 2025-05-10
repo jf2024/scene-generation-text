@@ -1,7 +1,9 @@
 import streamlit as st
 from agents_v2 import ScriptGenerationCrew
 
-st.title("Script Generator")
+st.title("Movie Script Generator")
+
+st.markdown("## Here to help spark an idea for your next movie!")
 
 prompt = st.text_input("Enter your script idea")
 
@@ -9,7 +11,7 @@ setting = st.text_input("Enter the setting for the script")
 
 genre = st.selectbox(
     "Choose a genre for the script",
-    ["Action", "Comedy", "Romance", "Horror", "Thriller"],
+    ["Action", "Comedy", "Romance", "Horror", "Thriller", "Science Fiction", "Drama", "Mystery", "Western", "Animation", "Documentary"],
     placeholder="Action"
 )
 
@@ -31,6 +33,7 @@ if st.button("Generate"):
     st.write("Genre:", genre)
     st.write("Director Style:", director)
     st.write("Scene Length:", scene_length)
+    st.write("Generating...")
 
     crew = ScriptGenerationCrew()
 
@@ -46,4 +49,4 @@ if st.button("Generate"):
         length=scene_length
     )
 
-    st.write(result)
+    st.write(result['final_scene'])
