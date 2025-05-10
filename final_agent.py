@@ -237,8 +237,8 @@ class WriterAgent:
                     SCREENPLAY FORMAT REQUIREMENTS:
                     1. SCENE HEADING: Use proper INT./EXT. format with LOCATION and TIME OF DAY
                     2. SCENE DESCRIPTION: Write vivid, visual descriptions in present tense with rich sensory details
-                    3. CHARACTER NAMES: Use ALL CAPS when first introducing a character
-                    4. DIALOGUE: Format with character name centered above their lines
+                    3. CHARACTER NAMES: Use ALL CAPS when first introducing a character, ALWAYS PROVIDE CHARACTER NAMES unless the user mentions to use a specific name
+                    4. DIALOGUE: Format with character name centered above their lines. ADD LOTS OF DIALOGUE 
                     5. PARENTHETICALS: Use sparingly for essential acting cues
 
                     STORYTELLING GUIDANCE:
@@ -314,12 +314,13 @@ class EditorAgent:
                     2. Maintain the scene's core premise while significantly enhancing:
                        - Scene descriptions with rich visual and sensory details
                        - Character development through actions and reactions
-                       - Dialogue depth and complexity
+                       - Dialogue depth and complexity, INCLUDE INTERACTIONS BETWEEN CHARACTERS, LOTS OF DIALOGUE 
                        - Emotional beats and subtext
                        - Environmental details that create atmosphere
                     3. Reflect {director_style}'s visual style and cinematic approach
                     4. Emphasize genre-specific elements of {genre}
                     5. Maintain proper screenplay format throughout
+                    6. If needed, give names to characters if not provided. Keep character names if the user mentions specific names they want to use
 
                     IMPORTANT INSTRUCTION:
                     For scenes marked {length_display}, be GENEROUS with your expansion. Add memorable moments, character quirks, and vivid descriptions that make the scene distinctive.
@@ -344,13 +345,14 @@ class EditorAgent:
                 MAJOR EXPANSION REQUIREMENTS:
                 1. Double or triple the scene's length while maintaining quality and coherence
                 2. Add substantial new content in these areas:
-                   - 3-5 new paragraphs of vivid scene description
-                   - At least 4-6 new dialogue exchanges between characters
+                   - 2-3 new paragraphs of vivid scene description
+                   - At least 10-14 new dialogue exchanges between characters, MORE DIALOGUE 
                    - Introduce a new emotional beat or complication
                    - Expand existing dialogue to show character depth
                    - Add a new dramatic moment or revelation
                 3. Incorporate {genre} genre elements and {director_style}'s signature visual style
                 4. Maintain proper screenplay format throughout
+                5. Make sure we have character names, if names are provided don't change it 
 
                 EXPANSION STRATEGIES:
                 - Introduce a new complication or obstacle for characters
