@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 from langchain_openai import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
@@ -11,6 +11,14 @@ import glob
 import pandas as pd
 
 load_dotenv()
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+# Verify API key is loaded
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY not found in environment variables")
+print(f"API Key loaded (first 8 chars): {api_key[:8]}...")
 
 def parse_annotated_script(file_path):
         """
@@ -89,14 +97,13 @@ class RAGAgent:
             structured_data.extend(parse_annotated_script(anno_file))
         return structured_data
         
-    def initialize_vector_store(self, data_dir: str, use_manual: bool = True):
+    def initialize_vector_store(self, data_dir: str):
         """Initialize the vector store with script examples from the annotations
         
         Args:
-            data_dir: Base directory containing manual_annotations and BERT_annotations
-            use_manual: Whether to use manual annotations (True) or BERT annotations (False)
+            data_dir: Base directory containing manual_annotations
         """
-        structured_data = self.load_script_data(data_dir, use_manual)
+        structured_data = self.parse_data(data_dir)
         
         # Load metadata
         metadata_path = os.path.join(data_dir, 'movie_meta_data.csv')
@@ -113,7 +120,11 @@ class RAGAgent:
             script_id = scene.get('script_id', '')  # You'll need to add this in parse_annotated_script
             
             # Get metadata for this script
-            script_meta = metadata_df[metadata_df['imdbid'] == script_id].iloc[0] if not metadata_df[metadata_df['imdbid'] == script_id].empty else None
+            try:
+                script_meta = metadata_df[metadata_df['imdbid'] == script_id].iloc[0] if not metadata_df[metadata_df['imdbid'] == script_id].empty else None
+            except IndexError:
+                print(f"Warning: No metadata found for script ID {script_id}")
+                script_meta = None
             
             # Format dialog with speakers for better context
             dialog_with_speakers = []
@@ -158,33 +169,58 @@ class RAGAgent:
         
         results = self.vector_store.similarity_search(query, k=k)
         return [doc.page_content for doc in results]
-
+    
 class WriterAgent:
     def __init__(self, temperature: float = 0.7):
         self.llm = ChatOpenAI(temperature=temperature)
         self.prompt = PromptTemplate(
-            input_variables=["genre", "setting", "idea", "examples"],
-            template="""You are an experienced screenwriter. Write a compelling scene based on the following criteria:
-            Genre: {genre}
-            Setting: {setting}
-            Core Idea: {idea}
-            
-            Here are some example scenes for reference:
-            {examples}
-            
-            Write a scene that follows proper screenplay format:
-            1. Start with a scene heading (INT/EXT, location, time)
-            2. Include clear scene descriptions
-            3. Format dialog with speaker names in caps
-            4. Add parentheticals for important acting cues
-            
-            Make the scene original and engaging while maintaining professional formatting.
-            """
+            input_variables=["genre", "setting", "idea", "director_style", "length", "examples"],
+            template="""You are an award-winning screenwriter with expertise in multiple genres. Write a compelling, professional-quality scene based on these specifications:
+
+                    SPECIFICATIONS:
+                    - Genre: {genre}
+                    - Setting: {setting}
+                    - Core Idea: {idea}
+                    - Director Style: {director_style}
+                    - Length: {length}
+
+                    STRICT LENGTH REQUIREMENTS:
+                    You must adhere to these exact specifications based on the requested length:
+                    - "short": 1-2 pages (approx. 250-500 words), 1-2 paragraphs of description, 3-5 dialogue exchanges
+                    - "medium": 3-4 pages (approx. 750-1000 words), 3-4 paragraphs of description, 8-12 dialogue exchanges
+                    - "long": 5-7 pages (approx. 1250-1750 words), 5+ paragraphs of description, 15+ dialogue exchanges
+
+                    SCREENPLAY FORMAT REQUIREMENTS:
+                    1. SCENE HEADING: Use proper INT./EXT. format with LOCATION and TIME OF DAY
+                    2. SCENE DESCRIPTION: Write vivid, visual descriptions in present tense. Focus on what can be SEEN and HEARD
+                    3. CHARACTER NAMES: Use ALL CAPS when first introducing a character
+                    4. DIALOGUE: Format with character name centered above their lines
+                    5. PARENTHETICALS: Use sparingly for essential acting cues (beat), (whispers), etc.
+                    6. Follow proper spacing between elements: double space between heading/action/dialogue blocks
+
+                    STORYTELLING GUIDANCE:
+                    1. Begin in media res - drop viewers into an active moment
+                    2. Create tension or conflict within the scene
+                    3. Reveal character through action and dialogue, not exposition
+                    4. Include sensory details that establish mood and atmosphere
+                    5. Pay close attention to pacing - vary sentence length for rhythm
+                    6. End with a compelling moment that moves the story forward
+
+                    STUDY THESE REFERENCE EXAMPLES:
+                    {examples}
+
+                    DIRECTOR STYLE NOTES:
+                    - Analyze the visual language, pacing, and emotional tone in the examples
+                    - Incorporate elements that reflect {director_style}'s signature techniques
+                    - Consider how {director_style} would frame shots and direct actor performances
+
+                    Now write a compelling scene that authentically reflects the {genre} genre and {director_style}'s cinematic style. Follow the EXACT length specifications for {length} length. Count your dialogue exchanges and descriptions to ensure compliance.
+                    """
         )
         self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
-    
-    def write_scene(self, genre: str, setting: str, idea: str, director_style: Optional[str], length: str,examples: List[str]) -> str:
-        """Generate a scene based on the given criteria and examples"""
+
+    def write_scene(self, genre: str, setting: str, idea: str, director_style: str, length: str, examples: List[str]) -> str:
+    """Generate a scene based on the given criteria and examples"""
         examples_text = "\n\n".join(examples) if examples else "No examples provided."
         return self.chain.run(
             genre=genre,
@@ -195,46 +231,82 @@ class WriterAgent:
             examples=examples_text
         )
 
+
+
 class EditorAgent:
     def __init__(self, temperature: float = 0.3):
         self.llm = ChatOpenAI(temperature=temperature)
         self.prompt = PromptTemplate(
-            input_variables=["scene", "genre", "feedback_points"],
-            template="""You are an experienced script editor. Review and improve the following scene:
+            input_variables=["scene", "genre", "director_style", "length"],
+            template="""You are a renowned script doctor who has edited award-winning screenplays across multiple genres. Critically analyze and elevate the following scene while strictly maintaining the specified length:
 
-            Scene:
-            {scene}
+                        ORIGINAL SCENE:
+                        {scene}
 
-            Genre: {genre}
-            Consider these specific points:
-            {feedback_points}
+                        SCENE PARAMETERS:
+                        - Genre: {genre}
+                        - Director Style: {director_style}
+                        - Target Length: {length}
 
-            Improve the scene while maintaining proper screenplay format:
-            1. Scene headings (INT/EXT, location, time)
-            2. Action descriptions (present tense, visual)
-            3. Character names in caps when first introduced
-            4. Dialog formatting and parentheticals
-            5. Proper spacing and structure
+                        STRICT LENGTH REQUIREMENTS - YOU MUST FOLLOW THESE EXACTLY:
+                        - "short": 1-2 pages (approx. 250-500 words), 1-2 paragraphs of description, 3-5 dialogue exchanges
+                        - "medium": 3-4 pages (approx. 750-1000 words), 3-4 paragraphs of description, 8-12 dialogue exchanges
+                        - "long": 5-7 pages (approx. 1250-1750 words), 5+ paragraphs of description, 15+ dialogue exchanges
 
-            Focus on:
-            1. Dialogue authenticity
-            2. Scene pacing
-            3. Character development
-            4. Visual storytelling
-            5. Genre consistency
+                        EDITING PROCESS (Complete each step):
 
-            Return the improved scene in proper screenplay format.
-            """
+                        STEP 1: LENGTH EVALUATION
+                        - Count words, paragraphs, and dialogue exchanges in the original scene
+                        - Determine if adjustments are needed to meet the length requirements for {length}
+                        - Plan to add or remove content as needed while preserving core story elements
+
+                        STEP 2: STRUCTURAL ASSESSMENT
+                        - Verify proper screenplay format elements:
+                          * Scene headings (INT./EXT. LOCATION - TIME OF DAY)
+                          * Action blocks (present tense, visual language)
+                          * Character introductions (ALL CAPS on first appearance)
+                          * Dialogue formatting (character name centered above lines)
+                          * Parentheticals (minimal, only when necessary)
+                          * Transitions and spacing (maintain industry-standard format)
+
+                        STEP 3: CONTENT ENHANCEMENT
+                        - Strengthen these narrative elements:
+                          * Opening hook (create immediate engagement)
+                          * Character objectives (ensure each character has clear motivation)
+                          * Conflict development (heighten tension appropriately for {genre})
+                          * Subtext (reduce on-the-nose dialogue, add layers of meaning)
+                          * Scene purpose (ensure scene advances plot or reveals character)
+                          * Ending impact (create momentum for next scene)
+
+                        STEP 4: STYLISTIC REFINEMENT
+                        - Apply {director_style}'s signature techniques:
+                          * Visual language (adjust descriptions to match director's visual style)
+                          * Pacing (modify rhythm of action and dialogue to match director's tempo)
+                          * Emotional tone (adjust for director's typical emotional register)
+                          * Shot suggestions (subtly imply camera work typical of this director)
+
+                        STEP 5: GENRE AUTHENTICITY
+                        - Intensify elements that make this authentically {genre}:
+                          * Tropes (use or subvert genre conventions purposefully)
+                          * Language (adjust dialogue/descriptions to genre expectations)
+                          * Atmosphere (enhance sensory details that establish genre feel)
+
+                        STEP 6: FINAL LENGTH VERIFICATION
+                        - Count words, paragraphs, and dialogue exchanges in your edited scene
+                        - Make final adjustments to ensure it matches the required length for {length}
+
+                        Return only the polished, production-ready scene in perfect screenplay format. Maintain the core story but significantly elevate the craft. The final scene MUST comply with the exact length specifications for {length} length.
+                        """
         )
         self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
     
-    def edit_scene(self, scene: str, genre: str, feedback_points: List[str]) -> str:
+    def edit_scene(self, scene: str, genre: str, director_style: str, length: str) -> str:
         """Edit and improve the given scene"""
-        feedback_text = "\n".join(feedback_points)
         return self.chain.run(
             scene=scene,
             genre=genre,
-            feedback_points=feedback_text
+            director_style=director_style,
+            length=length
         )
 
 class ScriptGenerationCrew:
@@ -243,22 +315,38 @@ class ScriptGenerationCrew:
         self.writer_agent = WriterAgent()
         self.editor_agent = EditorAgent()
         
-    def initialize_with_data(self, data_dir: str, use_manual: bool = True):
+    def initialize_with_data(self, data_dir: str):
         """Initialize the RAG agent with annotated scripts"""
-        self.rag_agent.initialize_vector_store(data_dir, use_manual)
+        self.rag_agent.initialize_vector_store(data_dir)
     
     def generate_scene(self, 
                       genre: str, 
                       setting: str, 
                       idea: str,
                       director_style: str,
-                      length: str) -> Dict[str, str]:
-        """Generate a complete scene using all agents"""
+                      length: str,
+                      debug: bool = False) -> Dict[str, str]:
+        """Generate a complete scene using all agents
+        
+        Args:
+            genre: The genre of the scene (e.g., "Science Fiction", "Drama")
+            setting: The location or environment for the scene (e.g., "Space Station")
+            idea: The core concept or conflict for the scene
+            director_style: The director whose style to emulate (e.g., "Steven Spielberg")
+            length: Scene length - "short", "medium", or "long"
+            debug: Whether to return detailed debug information
+            
+        Returns:
+            Dictionary containing the initial scene, final scene, examples used, and metrics
+        """
+        # Validate and standardize length parameter
+        length = length.lower().strip()
+        if length not in ["short", "medium", "long"]:
+            length = "medium"
         
         # 1. Retrieve relevant examples
-        relevant_examples = self.rag_agent.retrieve_relevant_content(
-            f"{genre} {setting} {idea}"
-        )
+        query = f"{genre} {setting} {idea} {director_style}"
+        relevant_examples = self.rag_agent.retrieve_relevant_content(query, k=3)
         
         # 2. Generate initial scene
         initial_scene = self.writer_agent.write_scene(
@@ -269,17 +357,41 @@ class ScriptGenerationCrew:
             length=length,
             examples=relevant_examples
         )
-            
+        
+        initial_word_count = len(initial_scene.split())
+        initial_dialogue_count = initial_scene.count("\n\n") // 2
+        
+        # 3. Edit the scene
         final_scene = self.editor_agent.edit_scene(
             scene=initial_scene,
-            genre=genre
+            genre=genre,
+            director_style=director_style,
+            length=length
         )
         
-        return {
+        # Calculate metrics
+        final_word_count = len(final_scene.split())
+        final_dialogue_count = final_scene.count("\n\n") // 2
+        
+        # Return comprehensive results
+        result = {
             "initial_scene": initial_scene,
             "final_scene": final_scene,
-            "examples_used": relevant_examples
+            "examples_used": relevant_examples if debug else [],
+            "metrics": {
+                "length_setting": length,
+                "initial_word_count": initial_word_count,
+                "final_word_count": final_word_count,
+                "word_count_change": final_word_count - initial_word_count,
+                "initial_dialogue_approx": initial_dialogue_count,
+                "final_dialogue_approx": final_dialogue_count
+            }
         }
+        
+        if not debug:
+            result.pop("examples_used", None)
+            
+        return result
 
 # Example usage
 if __name__ == "__main__":
@@ -288,15 +400,16 @@ if __name__ == "__main__":
     
     # Initialize with annotated data
     crew.initialize_with_data(
-        data_dir="data",
-        use_manual=True  # Use manual annotations (more accurate)
+        data_dir="data"
     )
     
     # Generate a scene
     result = crew.generate_scene(
         genre="Science Fiction",
         setting="Space Station",
-        idea="A crew member discovers an alien artifact that seems to be alive"
+        idea="A crew member discovers an alien artifact that seems to be alive",
+        director_style="Steven Spielberg",
+        length="long"
     )
     
     print("Final Scene:")
