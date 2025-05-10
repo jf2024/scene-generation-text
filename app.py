@@ -1,5 +1,6 @@
 import streamlit as st
-from agents_v2 import ScriptGenerationCrew
+#from agents_v2 import ScriptGenerationCrew
+from final_agent import ScriptGenerationCrew
 
 st.title("Movie Script Generator")
 
