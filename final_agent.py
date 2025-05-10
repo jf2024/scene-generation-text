@@ -15,14 +15,8 @@ load_dotenv()
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-# Verify API key is loaded
 api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("OPENAI_API_KEY not found in environment variables")
-print(f"API Key loaded (first 8 chars): {api_key[:8]}...")
 
-# Create a single source of truth for length requirements
-# MODIFIED: Increased word counts for longer scenes
 LENGTH_REQUIREMENTS = {
     "short": {
         "min_words": 180,
@@ -220,7 +214,6 @@ class WriterAgent:
         self.llm = ChatOpenAI(temperature=temperature)
         self.length_requirements = LENGTH_REQUIREMENTS
         
-        # IMPROVED: Enhanced prompt for initial writing
         self.prompt = PromptTemplate(
             input_variables=["genre", "setting", "idea", "director_style", "length", 
                            "examples", "expected_word_count", "expected_paragraphs", 
@@ -289,13 +282,12 @@ class WriterAgent:
         )
 
 class EditorAgent:
-    def __init__(self, temperature: float = 0.4):  # Slightly higher temperature
+    def __init__(self, temperature: float = 0.4):  
         self.llm = ChatOpenAI(temperature=temperature)
-        # Higher temperature for creative expansion
-        self.expansion_llm = ChatOpenAI(temperature=0.7)
+        self.expansion_llm = ChatOpenAI(temperature=0.7) #can adjust temp if needed
         self.length_requirements = LENGTH_REQUIREMENTS
 
-        # IMPROVED: Enhanced prompt with stronger expansion instructions
+    
         self.prompt = PromptTemplate(
             input_variables=[
                 "scene", "genre", "director_style", "length", "min_words", "max_words",
@@ -411,7 +403,6 @@ class EditorAgent:
         exchanges = len(re.findall(r'^[A-Z ]+:', scene, re.MULTILINE))
         return words, paragraphs, exchanges
 
-    # IMPROVED: Enhanced edit_scene with multiple passes and validation
     def edit_scene(self, scene: str, genre: str, director_style: str, length: str) -> str:
         length = length.lower()
         requirements = self.length_requirements.get(length, self.length_requirements["medium"])
@@ -604,12 +595,9 @@ class ScriptGenerationCrew:
             
         return result
 
-# Example usage
 if __name__ == "__main__":
-    # Initialize the crew
     crew = ScriptGenerationCrew()
     
-    # Initialize with annotated data
     crew.initialize_with_data(
         data_dir="data"
     )
@@ -626,6 +614,8 @@ if __name__ == "__main__":
     
     print("Final Scene:")
     print(result["final_scene"])
+
+    #if u want to see metrics
     # print("\nMetrics:")
     # for k, v in result["metrics"].items():
     #     print(f"{k}: {v}")
